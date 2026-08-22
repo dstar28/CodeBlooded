@@ -23,6 +23,7 @@ class _CreateSafetyCircleScreenState extends State<CreateSafetyCircleScreen> {
   final _nameController = TextEditingController();
 
   Trip? _selectedTrip;
+  bool _submitting = false;
 
   @override
   void dispose() {
@@ -32,14 +33,32 @@ class _CreateSafetyCircleScreenState extends State<CreateSafetyCircleScreen> {
 
   Future<void> _submit() async {
     final formValid = _formKey.currentState?.validate() ?? false;
-    if (!formValid) return;
+    if (!formValid || _submitting) return;
 
-    final createdGroup = SafetyCircleStore.instance.createGroup(
+    setState(() => _submitting = true);
+
+    final result = await SafetyCircleStore.instance.createGroup(
       name: _nameController.text.trim(),
       tripName: _selectedTrip?.name,
     );
 
     if (!mounted) return;
+
+    if (!result.success || result.group == null) {
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'Could not create the Safety Circle. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final createdGroup = result.group!;
+    setState(() => _submitting = false);
 
     await showDialog<void>(
       context: context,
@@ -139,8 +158,14 @@ class _CreateSafetyCircleScreenState extends State<CreateSafetyCircleScreen> {
                 ],
                 const SizedBox(height: 12),
                 ElevatedButton(
-                  onPressed: _submit,
-                  child: const Text('Create Circle'),
+                  onPressed: _submitting ? null : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Create Circle'),
                 ),
               ],
             ),

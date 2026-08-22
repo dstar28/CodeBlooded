@@ -37,6 +37,16 @@ class _SafetyCircleScreenState extends State<SafetyCircleScreen> {
   static const int _tripIndex = 3;
   static const int _digitalIdIndex = 4;
 
+  @override
+  void initState() {
+    super.initState();
+    // Refresh from the backend as soon as the screen opens instead of
+    // waiting for the periodic timer, if a group is already active.
+    if (SafetyCircleStore.instance.hasGroup) {
+      SafetyCircleStore.instance.refreshGroupStatus();
+    }
+  }
+
   void _onNavTap(int index) {
     if (index == _groupIndex) return;
 
@@ -571,10 +581,28 @@ class _GroupDetailsView extends StatelessWidget {
         : SafetyCircleStore.instance.memberById(alertMemberId);
     final overall = _GroupOverallStatus.of(group);
     final separation = _GroupSeparation.of(group);
+    final isOffline = SafetyCircleStore.instance.isOffline;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
+        if (isOffline) ...[
+          Row(
+            children: [
+              const Icon(
+                Icons.cloud_off_outlined,
+                color: AppColors.textSecondary,
+                size: 14,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Offline — showing last known status',
+                style: textTheme.bodyMedium?.copyWith(fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+        ],
         if (alertMember != null) ...[
           _SafetyAlertBanner(
             member: alertMember,

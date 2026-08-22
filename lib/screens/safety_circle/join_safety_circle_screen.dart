@@ -5,8 +5,8 @@ import '../../theme/app_colors.dart';
 
 /// Join Safety Circle form (Prompt #9).
 ///
-/// This only checks the entered code against a small local list of mock
-/// codes in [SafetyCircleStore] — there is no real backend lookup yet.
+/// Submits the entered invite code to the SafeGuard FastAPI backend via
+/// [SafetyCircleStore.joinGroup].
 class JoinSafetyCircleScreen extends StatefulWidget {
   const JoinSafetyCircleScreen({super.key});
 
@@ -18,6 +18,7 @@ class JoinSafetyCircleScreen extends StatefulWidget {
 class _JoinSafetyCircleScreenState extends State<JoinSafetyCircleScreen> {
   final _codeController = TextEditingController();
   String? _error;
+  bool _submitting = false;
 
   @override
   void dispose() {
@@ -25,16 +26,29 @@ class _JoinSafetyCircleScreenState extends State<JoinSafetyCircleScreen> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_submitting) return;
+
     final code = _codeController.text.trim();
     if (code.isEmpty) {
       setState(() => _error = 'Please enter a Safety Circle code');
       return;
     }
 
-    final joined = SafetyCircleStore.instance.joinGroup(code);
-    if (!joined) {
-      setState(() => _error = 'Invalid Safety Circle Code');
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    final result = await SafetyCircleStore.instance.joinGroup(code);
+
+    if (!mounted) return;
+
+    if (!result.success) {
+      setState(() {
+        _submitting = false;
+        _error = result.errorMessage ?? 'Invalid Safety Circle Code';
+      });
       return;
     }
 
@@ -72,8 +86,14 @@ class _JoinSafetyCircleScreenState extends State<JoinSafetyCircleScreen> {
               ],
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: _submit,
-                child: const Text('Join Circle'),
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Join Circle'),
               ),
             ],
           ),

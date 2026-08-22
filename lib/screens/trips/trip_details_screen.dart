@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import '../../models/trip.dart';
+import '../../state/emergency_contacts_store.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/date_format.dart';
+import '../../widgets/trip_itinerary_widgets.dart';
+import '../emergency/emergency_screen.dart';
 import '../live_safety_screen.dart';
 
 /// Trip Details screen.
 ///
-/// Shows full info for a single [trip]. "Start Trip" and "View Safety"
-/// both open the Live Safety screen for this trip (Prompt #6) — there is
-/// still no real background tracking wired up behind it yet.
+/// Shows full info for a single [trip]: overview, trip status, itinerary,
+/// safety information, and emergency support. "Start Trip" and "View
+/// Safety" both open the Live Safety screen for this trip (Prompt #6) —
+/// there is still no real background tracking wired up behind it yet.
 class TripDetailsScreen extends StatelessWidget {
   const TripDetailsScreen({super.key, required this.trip});
 
@@ -20,10 +24,18 @@ class TripDetailsScreen extends StatelessWidget {
     );
   }
 
+  void _openEmergencySupport(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const EmergencyScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final isActive = trip.status == TripStatus.active;
+    final primaryContact = EmergencyContactsStore.instance.primaryContact;
+    final stops = buildDemoItinerary(trip);
 
     return Scaffold(
       appBar: AppBar(title: Text(trip.name)),
@@ -33,6 +45,7 @@ class TripDetailsScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Trip overview
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
@@ -55,7 +68,7 @@ class TripDetailsScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        _StatusChip(status: trip.status),
+                        TripStatusPill(status: trip.status),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -76,10 +89,134 @@ class TripDetailsScreen extends StatelessWidget {
                       label: 'End Date',
                       value: formatFullDate(trip.endDate),
                     ),
+                    const SizedBox(height: 12),
+                    const _DetailRow(
+                      icon: Icons.group_outlined,
+                      label: 'Travelers',
+                      value: 'You',
+                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Trip status
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Trip Status', style: textTheme.titleMedium),
+                    const SizedBox(height: 10),
+                    Text(
+                      tripStatusHeadline(trip.status),
+                      style: TextStyle(
+                        color: tripStatusColor(trip.status),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      tripStatusDescription(trip.status),
+                      style: textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Itinerary
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Itinerary', style: textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Sample itinerary based on this trip — for demo '
+                      'purposes.',
+                      style: textTheme.bodyMedium?.copyWith(fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    TripItineraryTimeline(stops: stops, status: trip.status),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Safety information
+              SafetyQuickLinksCard(
+                trip: trip,
+                title: 'Safety Information',
+              ),
+              const SizedBox(height: 16),
+
+              // Emergency support
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.dangerSurface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.danger.withOpacity(0.25)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.support_agent_outlined,
+                          color: AppColors.danger,
+                        ),
+                        const SizedBox(width: 10),
+                        Text('Emergency Support', style: textTheme.titleMedium),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      primaryContact != null
+                          ? 'Primary contact: ${primaryContact.name}'
+                          : 'No emergency contact added yet.',
+                      style: textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openEmergencySupport(context),
+                        icon: const Icon(Icons.emergency_outlined, color: AppColors.danger),
+                        label: const Text(
+                          'Open Emergency Support',
+                          style: TextStyle(color: AppColors.danger),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: AppColors.danger.withOpacity(0.4),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Notes
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
@@ -149,43 +286,6 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.status});
-
-  final TripStatus status;
-
-  Color get _color {
-    switch (status) {
-      case TripStatus.active:
-        return AppColors.accent;
-      case TripStatus.upcoming:
-      case TripStatus.completed:
-        return AppColors.textSecondary;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _color;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.4)),
-      ),
-      child: Text(
-        status.label,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }

@@ -1,34 +1,50 @@
-import 'dart:math';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+
 import '../models/safety_circle_group.dart';
+import '../services/api/safeguard_api_client.dart';
+import '../services/supabase/local_identity.dart';
 import '../services/supabase/safety_circle_repository.dart';
 import '../services/supabase/sync_state.dart';
 
-/// In-memory Safety Circle store for local/mock group state (Prompt #9).
+/// Outcome of a create/join action, so screens can show their own
+/// error text (matching their existing UI) without the store throwing.
+class SafetyCircleActionResult {
+  const SafetyCircleActionResult._(this.success, this.group, this.errorMessage);
+
+  final bool success;
+  final SafetyCircleGroup? group;
+  final String? errorMessage;
+
+  factory SafetyCircleActionResult.success(SafetyCircleGroup group) =>
+      SafetyCircleActionResult._(true, group, null);
+
+  factory SafetyCircleActionResult.failure(String message) =>
+      SafetyCircleActionResult._(false, null, message);
+}
+
+/// Safety Circle store, backed by the SafeGuard FastAPI Group backend.
 ///
-/// This is intentionally a lightweight singleton `ChangeNotifier`,
-/// matching [TripStore] and [SosStore] — no new state-management
-/// package, no Supabase Realtime, no real backend group service. Group
-/// membership/status remains local/mock for the lifetime of the running
-/// app. As of Prompt #12, creating or joining a circle also persists a
-/// FOUNDATION record (circle + membership row) to Supabase in the
-/// background via [SafetyCircleRepository] — no continuous GPS, no
-/// real-time tracking, and no push notifications are added by this.
+/// This is still a lightweight singleton `ChangeNotifier`, matching
+/// [TripStore] and [SosStore] — no new state-management package. As of
+/// this update, group creation/joining/loading, group-member status, and
+/// location updates all go through [SafeguardApiClient] rather than
+/// local mock data. The Supabase "foundation" sync via
+/// [SafetyCircleRepository] is unrelated persistence and is left as-is.
 ///
-/// Joining is simulated against a small set of mock codes so the "Join
-/// Safety Circle" flow can be demonstrated without a backend. Creating a
-/// group generates a fresh mock code locally.
+/// The tourist-facing UI only ever sees plain-language status
+/// (safe/caution/danger/offline) and distance — never a numerical risk
+/// score. The admin AI risk endpoint is intentionally not called from
+/// anywhere in this store.
 class SafetyCircleStore extends ChangeNotifier {
   SafetyCircleStore._internal();
 
   static final SafetyCircleStore instance = SafetyCircleStore._internal();
 
-  /// Codes a user is allowed to "join" in this mock implementation, as if
-  /// another traveler had already created these circles.
-  static const List<String> _mockJoinableCodes = ['SG-2025', 'SG-7143'];
-
-  final Random _random = Random();
+  static const Duration _refreshInterval = Duration(seconds: 20);
+  static const Duration _locationUpdateInterval = Duration(seconds: 15);
 
   SafetyCircleGroup? _group;
 
@@ -37,8 +53,20 @@ class SafetyCircleStore extends ChangeNotifier {
 
   bool get hasGroup => _group != null;
 
+  /// True while a create/join/refresh call to the backend is in flight.
+  bool _isLoading = false;
+  bool get isLoading => _isLoading;
+
+  /// True when the most recent background refresh could not reach the
+  /// backend. The last successfully loaded group data is kept on screen;
+  /// this only drives an unobtrusive "offline" indicator.
+  bool _isOffline = false;
+  bool get isOffline => _isOffline;
+
   /// Id of the member currently flagged as being in danger, used to drive
-  /// the Safety Alert banner. Null when there is no active alert.
+  /// the Safety Alert banner. Null when there is no active alert. This
+  /// remains a local/demo concept — the backend does not report a
+  /// "danger" status, only SAFE/WARNING.
   String? _alertMemberId;
   String? get alertMemberId => _alertMemberId;
 
@@ -48,87 +76,256 @@ class SafetyCircleStore extends ChangeNotifier {
   /// persistence-foundation record.
   SyncState get syncState => _syncState;
 
-  List<SafetyCircleMember> _mockMembers() => [
+  Timer? _refreshTimer;
+  DateTime? _lastLocationSentAt;
+
+  /// Creates a new Safety Circle via the backend and makes it the
+  /// current group.
+  Future<SafetyCircleActionResult> createGroup({
+    required String name,
+    String? tripName,
+  }) async {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) {
+      return SafetyCircleActionResult.failure('Group name is required');
+    }
+
+    _isLoading = true;
+    notifyListeners();
+
+    final userId = LocalIdentity.demoUserId;
+    const userName = 'You';
+
+    final result = await SafeguardApiClient.instance.createGroup(
+      name: trimmedName,
+      userId: userId,
+      userName: userName,
+    );
+
+    if (!result.isSuccess) {
+      _isLoading = false;
+      notifyListeners();
+      return SafetyCircleActionResult.failure(
+        result.message ?? 'Could not create the Safety Circle. Please try again.',
+      );
+    }
+
+    final data = result.data!;
+    final groupId = data['group_id'] as String?;
+    final inviteCode = data['invite_code'] as String?;
+
+    if (groupId == null || inviteCode == null) {
+      _isLoading = false;
+      notifyListeners();
+      return SafetyCircleActionResult.failure(
+        'Unexpected response from the server. Please try again.',
+      );
+    }
+
+    final newGroup = SafetyCircleGroup(
+      id: groupId,
+      name: data['name'] as String? ?? trimmedName,
+      code: inviteCode,
+      members: [
         SafetyCircleMember(
-          id: 'you',
-          name: 'You',
+          id: userId,
+          name: userName,
           status: MemberSafetyStatus.safe,
           isCurrentUser: true,
         ),
-        SafetyCircleMember(
-          id: 'aarav',
-          name: 'Aarav',
-          status: MemberSafetyStatus.safe,
-          lastUpdatedLabel: '1 min ago',
-          distanceKm: 0.6,
-        ),
-        SafetyCircleMember(
-          id: 'priya',
-          name: 'Priya',
-          status: MemberSafetyStatus.safe,
-          lastUpdatedLabel: '1 min ago',
-          distanceKm: 0.8,
-        ),
-        SafetyCircleMember(
-          id: 'rahul',
-          name: 'Rahul',
-          status: MemberSafetyStatus.safe,
-          lastUpdatedLabel: '2 min ago',
-          distanceKm: 1.1,
-        ),
-      ];
-
-  String _generateCode() {
-    final number = 1000 + _random.nextInt(9000);
-    return 'SG-$number';
-  }
-
-  /// Creates a new Safety Circle locally and makes it the current group.
-  SafetyCircleGroup createGroup({required String name, String? tripName}) {
-    final newGroup = SafetyCircleGroup(
-      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
-      name: name,
-      code: _generateCode(),
-      members: _mockMembers(),
+      ],
       tripName: tripName,
     );
 
     _group = newGroup;
     _alertMemberId = null;
+    _isOffline = false;
+    _isLoading = false;
     notifyListeners();
+
     _syncCircle(newGroup, addSelfAsMember: true);
+    _startAutoRefresh();
+    unawaited(_loadGroupDetails(groupId));
+
+    return SafetyCircleActionResult.success(newGroup);
+  }
+
+  /// Joins an existing Safety Circle by invite code via the backend.
+  Future<SafetyCircleActionResult> joinGroup(String code) async {
+    final normalized = code.trim().toUpperCase();
+    if (normalized.isEmpty) {
+      return SafetyCircleActionResult.failure(
+        'Please enter a Safety Circle code',
+      );
+    }
+
+    _isLoading = true;
+    notifyListeners();
+
+    final userId = LocalIdentity.demoUserId;
+    const userName = 'You';
+
+    final joinResult = await SafeguardApiClient.instance.joinGroup(
+      inviteCode: normalized,
+      userId: userId,
+      userName: userName,
+    );
+
+    if (!joinResult.isSuccess) {
+      _isLoading = false;
+      notifyListeners();
+      if (joinResult.status == ApiStatus.notFound) {
+        return SafetyCircleActionResult.failure('Invalid Safety Circle Code');
+      }
+      return SafetyCircleActionResult.failure(
+        joinResult.message ??
+            'Could not join the Safety Circle. Please try again.',
+      );
+    }
+
+    final groupId = joinResult.data!['group_id'] as String?;
+    if (groupId == null) {
+      _isLoading = false;
+      notifyListeners();
+      return SafetyCircleActionResult.failure(
+        'Unexpected response from the server. Please try again.',
+      );
+    }
+
+    final loaded = await _loadGroupDetails(groupId, fallbackCode: normalized);
+    _isLoading = false;
+
+    if (loaded == null) {
+      notifyListeners();
+      return SafetyCircleActionResult.failure(
+        'Joined the group, but could not load it. Pull down to try again.',
+      );
+    }
+
+    _alertMemberId = null;
+    notifyListeners();
+
+    _syncCircle(loaded, addSelfAsMember: true);
+    _startAutoRefresh();
+
+    return SafetyCircleActionResult.success(loaded);
+  }
+
+  /// Re-fetches the current group's members and safety status from the
+  /// backend. Safe to call repeatedly (used by the periodic refresh
+  /// timer); keeps the last good data on screen if the backend can't be
+  /// reached.
+  Future<void> refreshGroupStatus() async {
+    final current = _group;
+    if (current == null) return;
+    await _loadGroupDetails(current.id, fallbackCode: current.code);
+  }
+
+  /// Fetches group membership + safety status and merges them into the
+  /// store's [SafetyCircleGroup]. Returns the new group, or null if the
+  /// group could not be loaded at all (e.g. it no longer exists).
+  Future<SafetyCircleGroup?> _loadGroupDetails(
+    String groupId, {
+    String? fallbackCode,
+  }) async {
+    final groupResult = await SafeguardApiClient.instance.getGroup(groupId);
+
+    if (!groupResult.isSuccess) {
+      // Keep whatever we already have on screen; just surface an
+      // unobtrusive offline/error indicator for network failures.
+      _isOffline = groupResult.isNetworkFailure;
+      notifyListeners();
+      return null;
+    }
+
+    final data = groupResult.data!;
+    final rawMembers = (data['members'] as List<dynamic>?) ?? const [];
+    final currentUserId = LocalIdentity.demoUserId;
+
+    // Best-effort: safety status failing shouldn't block showing members.
+    final statusResult = await SafeguardApiClient.instance.getSafetyStatus(
+      groupId,
+    );
+    final statusByUser = <String, Map<String, dynamic>>{};
+    if (statusResult.isSuccess) {
+      final statusMembers =
+          (statusResult.data!['members'] as List<dynamic>?) ?? const [];
+      for (final entry in statusMembers) {
+        final map = entry as Map<String, dynamic>;
+        final userId = map['user_id'] as String?;
+        if (userId != null) statusByUser[userId] = map;
+      }
+    }
+
+    final members = rawMembers.map((entry) {
+      final map = entry as Map<String, dynamic>;
+      final userId = map['user_id'] as String? ?? '';
+      final isCurrentUser = userId == currentUserId;
+      final statusEntry = statusByUser[userId];
+
+      MemberSafetyStatus status;
+      double? distanceKm;
+      String lastUpdatedLabel;
+
+      if (statusEntry != null) {
+        final backendStatus = statusEntry['status'] as String?;
+        status = backendStatus == 'WARNING'
+            ? MemberSafetyStatus.caution
+            : MemberSafetyStatus.safe;
+        final rawDistance = statusEntry['distance_km'];
+        distanceKm = isCurrentUser
+            ? null
+            : (rawDistance is num ? rawDistance.toDouble() : null);
+        lastUpdatedLabel = 'Just now';
+      } else {
+        // No location reported for this member yet — never fabricate a
+        // distance or a dangerous-sounding status.
+        status = MemberSafetyStatus.safe;
+        distanceKm = null;
+        lastUpdatedLabel = 'No location yet';
+      }
+
+      // A member flagged in a local demo alert stays visually "in
+      // danger" until dismissed/reset, even though the backend has no
+      // such concept.
+      if (userId == _alertMemberId) {
+        status = MemberSafetyStatus.danger;
+      }
+
+      return SafetyCircleMember(
+        id: userId,
+        name: map['name'] as String? ?? 'Member',
+        status: status,
+        isCurrentUser: isCurrentUser,
+        lastUpdatedLabel: lastUpdatedLabel,
+        distanceKm: distanceKm,
+      );
+    }).toList();
+
+    final newGroup = SafetyCircleGroup(
+      id: data['group_id'] as String? ?? groupId,
+      name: data['name'] as String? ?? _group?.name ?? '',
+      code: data['invite_code'] as String? ??
+          fallbackCode ??
+          _group?.code ??
+          '',
+      members: members,
+      tripName: _group?.tripName,
+    );
+
+    _group = newGroup;
+    _isOffline = false;
+    notifyListeners();
     return newGroup;
   }
 
-  /// Attempts to join a mock Safety Circle by code.
-  ///
-  /// Returns true on success. This never talks to a real backend for the
-  /// *join validation* itself — it only checks against a small local
-  /// list of demo codes — but a successful join is still recorded via
-  /// [SafetyCircleRepository] in the background.
-  bool joinGroup(String code) {
-    final normalized = code.trim().toUpperCase();
-    if (normalized.isEmpty || !_mockJoinableCodes.contains(normalized)) {
-      return false;
-    }
-
-    final joined = SafetyCircleGroup(
-      id: 'joined-$normalized',
-      name: 'Goa Trip',
-      code: normalized,
-      members: _mockMembers(),
-    );
-    _group = joined;
-    _alertMemberId = null;
-    notifyListeners();
-    _syncCircle(joined, addSelfAsMember: true);
-    return true;
-  }
-
-  /// Removes the current user from their Safety Circle.
+  /// Removes the current user from their Safety Circle (locally). Stops
+  /// background refresh/location timers.
   void leaveGroup() {
+    _stopAutoRefresh();
     _group = null;
     _alertMemberId = null;
+    _isOffline = false;
     notifyListeners();
   }
 
@@ -142,7 +339,9 @@ class SafetyCircleStore extends ChangeNotifier {
   }
 
   /// Demo-only control: flips a non-current-user member to Danger and
-  /// raises a local Safety Alert. Does not send any real notification.
+  /// raises a local Safety Alert. Does not send any real notification and
+  /// does not call the backend — this purely overlays the local group
+  /// state shown on screen.
   void simulateDanger({String? memberId}) {
     final currentGroup = _group;
     if (currentGroup == null) return;
@@ -180,7 +379,11 @@ class SafetyCircleStore extends ChangeNotifier {
     if (currentGroup == null) return;
 
     final resetMembers = currentGroup.members
-        .map((m) => m.copyWith(status: MemberSafetyStatus.safe))
+        .map(
+          (m) => m.status == MemberSafetyStatus.danger
+              ? m.copyWith(status: MemberSafetyStatus.safe)
+              : m,
+        )
         .toList();
 
     _group = SafetyCircleGroup(
@@ -198,6 +401,68 @@ class SafetyCircleStore extends ChangeNotifier {
   void dismissAlert() {
     _alertMemberId = null;
     notifyListeners();
+  }
+
+  void _startAutoRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
+      unawaited(refreshGroupStatus());
+      unawaited(_sendLocationIfDue());
+    });
+  }
+
+  void _stopAutoRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+  }
+
+  /// Best-effort, throttled location send (respects the backend's
+  /// `location_update_interval_seconds = 15`). Never prompts more than
+  /// the standard system permission dialog, and silently does nothing if
+  /// location isn't available — this runs in the background alongside
+  /// the "Safety Monitoring: Active" info tile already shown on screen.
+  Future<void> _sendLocationIfDue() async {
+    final current = _group;
+    if (current == null) return;
+
+    final now = DateTime.now();
+    if (_lastLocationSentAt != null &&
+        now.difference(_lastLocationSentAt!) < _locationUpdateInterval) {
+      return;
+    }
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      _lastLocationSentAt = now;
+
+      await SafeguardApiClient.instance.updateLocation(
+        userId: LocalIdentity.demoUserId,
+        groupId: current.id,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+      );
+    } catch (_) {
+      // Best-effort background update only — never surface this as a
+      // screen-level error.
+    }
   }
 
   Future<void> _syncCircle(
@@ -225,5 +490,11 @@ class SafetyCircleStore extends ChangeNotifier {
       _syncState = SyncState.error;
     }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _stopAutoRefresh();
+    super.dispose();
   }
 }
