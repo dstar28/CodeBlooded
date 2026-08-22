@@ -2,13 +2,19 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import '../models/safety_circle_group.dart';
+import '../services/supabase/safety_circle_repository.dart';
+import '../services/supabase/sync_state.dart';
 
 /// In-memory Safety Circle store for local/mock group state (Prompt #9).
 ///
-/// This is intentionally a lightweight singleton `ChangeNotifier`, matching
-/// [TripStore] and [SosStore] — no new state-management package, no
-/// Supabase Realtime, no real backend group service. Group membership
-/// only persists for the lifetime of the running app.
+/// This is intentionally a lightweight singleton `ChangeNotifier`,
+/// matching [TripStore] and [SosStore] — no new state-management
+/// package, no Supabase Realtime, no real backend group service. Group
+/// membership/status remains local/mock for the lifetime of the running
+/// app. As of Prompt #12, creating or joining a circle also persists a
+/// FOUNDATION record (circle + membership row) to Supabase in the
+/// background via [SafetyCircleRepository] — no continuous GPS, no
+/// real-time tracking, and no push notifications are added by this.
 ///
 /// Joining is simulated against a small set of mock codes so the "Join
 /// Safety Circle" flow can be demonstrated without a backend. Creating a
@@ -36,6 +42,12 @@ class SafetyCircleStore extends ChangeNotifier {
   String? _alertMemberId;
   String? get alertMemberId => _alertMemberId;
 
+  SyncState _syncState = SyncState.idle;
+
+  /// Status of the most recent Supabase sync attempt for this circle's
+  /// persistence-foundation record.
+  SyncState get syncState => _syncState;
+
   List<SafetyCircleMember> _mockMembers() => [
         SafetyCircleMember(
           id: 'you',
@@ -47,16 +59,22 @@ class SafetyCircleStore extends ChangeNotifier {
           id: 'aarav',
           name: 'Aarav',
           status: MemberSafetyStatus.safe,
+          lastUpdatedLabel: '1 min ago',
+          distanceKm: 0.6,
         ),
         SafetyCircleMember(
           id: 'priya',
           name: 'Priya',
           status: MemberSafetyStatus.safe,
+          lastUpdatedLabel: '1 min ago',
+          distanceKm: 0.8,
         ),
         SafetyCircleMember(
           id: 'rahul',
           name: 'Rahul',
           status: MemberSafetyStatus.safe,
+          lastUpdatedLabel: '2 min ago',
+          distanceKm: 1.1,
         ),
       ];
 
@@ -78,27 +96,32 @@ class SafetyCircleStore extends ChangeNotifier {
     _group = newGroup;
     _alertMemberId = null;
     notifyListeners();
+    _syncCircle(newGroup, addSelfAsMember: true);
     return newGroup;
   }
 
   /// Attempts to join a mock Safety Circle by code.
   ///
-  /// Returns true on success. This never talks to a real backend — it
-  /// only checks against a small local list of demo codes.
+  /// Returns true on success. This never talks to a real backend for the
+  /// *join validation* itself — it only checks against a small local
+  /// list of demo codes — but a successful join is still recorded via
+  /// [SafetyCircleRepository] in the background.
   bool joinGroup(String code) {
     final normalized = code.trim().toUpperCase();
     if (normalized.isEmpty || !_mockJoinableCodes.contains(normalized)) {
       return false;
     }
 
-    _group = SafetyCircleGroup(
+    final joined = SafetyCircleGroup(
       id: 'joined-$normalized',
       name: 'Goa Trip',
       code: normalized,
       members: _mockMembers(),
     );
+    _group = joined;
     _alertMemberId = null;
     notifyListeners();
+    _syncCircle(joined, addSelfAsMember: true);
     return true;
   }
 
@@ -126,7 +149,10 @@ class SafetyCircleStore extends ChangeNotifier {
 
     final targetId = memberId ??
         currentGroup.members
-            .firstWhere((m) => !m.isCurrentUser, orElse: () => currentGroup.members.first)
+            .firstWhere(
+              (m) => !m.isCurrentUser,
+              orElse: () => currentGroup.members.first,
+            )
             .id;
 
     final updatedMembers = currentGroup.members
@@ -171,6 +197,33 @@ class SafetyCircleStore extends ChangeNotifier {
   /// Dismisses the current Safety Alert banner without changing status.
   void dismissAlert() {
     _alertMemberId = null;
+    notifyListeners();
+  }
+
+  Future<void> _syncCircle(
+    SafetyCircleGroup group, {
+    bool addSelfAsMember = false,
+  }) async {
+    _syncState = SyncState.syncing;
+    notifyListeners();
+
+    final circleResult = await SafetyCircleRepository.instance.saveCircle(
+      id: group.id,
+      name: group.name,
+      inviteCode: group.code,
+    );
+
+    if (circleResult.isSuccess && addSelfAsMember) {
+      await SafetyCircleRepository.instance.addMember(circleId: group.id);
+    }
+
+    if (circleResult.isSuccess) {
+      _syncState = SyncState.synced;
+    } else if (circleResult.isOffline) {
+      _syncState = SyncState.offline;
+    } else {
+      _syncState = SyncState.error;
+    }
     notifyListeners();
   }
 }

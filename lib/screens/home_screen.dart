@@ -1,17 +1,28 @@
 import 'package:flutter/material.dart';
+import '../models/trip.dart';
+import '../state/trip_store.dart';
 import '../theme/app_colors.dart';
 import '../routes/app_routes.dart';
-import 'placeholder_screen.dart';
+import '../utils/date_format.dart';
+import '../widgets/app_bottom_nav.dart';
 import 'emergency/emergency_screen.dart';
+import 'trips/trip_details_screen.dart';
+import 'live_safety_screen.dart';
+import 'safety_circle/safety_circle_screen.dart';
+import 'tourist_id/digital_tourist_id_screen.dart';
 
 /// SafeGuard Home Dashboard.
 ///
 /// This is the traveler's main screen. Everything on it is MOCK UI only:
-/// no live location, no real trip data, no real AI risk scoring, and no
-/// real SOS backend. Traveler-facing safety state is shown as a plain-
-/// language status ("Safe" / "Caution" / "Warning" / "Emergency") — the
-/// numerical risk score is an admin-only concept and must never appear
-/// here.
+/// no live location, no real AI risk scoring, and no real SOS backend.
+/// Traveler-facing safety state is shown as a plain-language status
+/// ("Safe" / "Caution" / "Warning" / "Emergency") — the numerical risk
+/// score is an admin-only concept and must never appear here.
+///
+/// Visual language: clean light background, dark navy text, muted gray
+/// secondary text, and a teal/green brand accent — matching the
+/// SafeGuard reference UI. Active trip data comes from the existing
+/// [TripStore] singleton; nothing here creates a second trip system.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -20,23 +31,37 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Bottom nav index. Home dashboard always keeps "Home" selected — the
-  // other tabs push a temporary placeholder screen rather than swapping
-  // the body, since Trips/Alerts/Profile aren't implemented yet.
+  // Bottom nav order matches the SafeGuard reference shell:
+  // Home | Safety | Group | Trip | Digital ID.
   static const int _homeIndex = 0;
+  static const int _safetyIndex = 1;
+  static const int _groupIndex = 2;
+  static const int _tripIndex = 3;
+  static const int _digitalIdIndex = 4;
 
   void _onNavTap(int index) {
     if (index == _homeIndex) return;
 
     switch (index) {
-      case 1:
+      case _safetyIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const LiveSafetyScreen()),
+        );
+        break;
+      case _groupIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SafetyCircleScreen()),
+        );
+        break;
+      case _tripIndex:
+        // Full Trip tab UI is out of scope for this pass; reuses the
+        // existing placeholder-route architecture until it's built out.
         Navigator.of(context).pushNamed(AppRoutes.trips);
         break;
-      case 2:
-        Navigator.of(context).pushNamed(AppRoutes.notifications);
-        break;
-      case 3:
-        Navigator.of(context).pushNamed(AppRoutes.profile);
+      case _digitalIdIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DigitalTouristIdScreen()),
+        );
         break;
     }
   }
@@ -47,33 +72,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _openTripDetail() {
+  void _openTripDetail(Trip trip) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const PlaceholderScreen(
-          title: 'Trip Details',
-          subtitle: 'Full trip details will be available in a later step.',
-          icon: Icons.map_outlined,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => TripDetailsScreen(trip: trip)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final trips = TripStore.instance.trips;
+    final activeTrip = trips.isNotEmpty ? trips.first : null;
+
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _HomeHeader(),
+              const _HomeHeader(),
               const SizedBox(height: 20),
+              const _GreetingText(),
+              const SizedBox(height: 16),
               const _SafetyStatusCard(),
               const SizedBox(height: 16),
-              _ActiveTripCard(onViewTrip: _openTripDetail),
-              const SizedBox(height: 20),
+              if (activeTrip != null)
+                _ActiveTripCard(
+                  trip: activeTrip,
+                  onViewTrip: () => _openTripDetail(activeTrip),
+                ),
+              if (activeTrip != null) const SizedBox(height: 20),
               _QuickActionsSection(onSosTap: _openEmergencyScreen),
               const SizedBox(height: 20),
               const _SafetyAlertsSection(),
@@ -81,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: _HomeBottomNav(
+      bottomNavigationBar: AppBottomNav(
         currentIndex: _homeIndex,
         onTap: _onNavTap,
       ),
@@ -90,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// Header
+// Header (branding)
 // ---------------------------------------------------------------------------
 
 class _HomeHeader extends StatelessWidget {
@@ -101,31 +130,130 @@ class _HomeHeader extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.accentDark,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.shield_outlined,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Good morning,', style: textTheme.bodyMedium),
-              const SizedBox(height: 2),
-              Text('Traveler', style: textTheme.headlineMedium),
+              Text(
+                'SAFEGUARD',
+                style: textTheme.titleMedium?.copyWith(
+                  letterSpacing: 0.6,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                'Your Travel Guardian',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: AppColors.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),
-        Container(
-          width: 44,
-          height: 44,
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          icon: Icons.notifications_none_outlined,
+          showBadge: true,
+          onTap: () => Navigator.of(context).pushNamed(AppRoutes.notifications),
+        ),
+        const SizedBox(width: 10),
+        _HeaderIconButton(
+          icon: Icons.person_outline,
+          onTap: () => Navigator.of(context).pushNamed(AppRoutes.profile),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.showBadge = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool showBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: AppColors.surface,
             shape: BoxShape.circle,
             border: Border.all(color: AppColors.border),
           ),
-          child: const Icon(
-            Icons.person_outline,
-            color: AppColors.accent,
-            size: 22,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon, color: AppColors.textPrimary, size: 20),
+              if (showBadge)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.surface, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Greeting
+// ---------------------------------------------------------------------------
+
+class _GreetingText extends StatelessWidget {
+  const _GreetingText();
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Good morning,', style: textTheme.bodyMedium),
+        const SizedBox(height: 2),
+        Text('Traveler', style: textTheme.headlineMedium),
       ],
     );
   }
@@ -144,25 +272,25 @@ class _SafetyStatusCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.accent.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.accent.withOpacity(0.35)),
+        color: AppColors.safeSurface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.safe.withOpacity(0.25)),
       ),
       child: Row(
         children: [
           Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.16),
+            width: 52,
+            height: 52,
+            decoration: const BoxDecoration(
+              color: Colors.white,
               shape: BoxShape.circle,
             ),
             child: const Icon(
-              Icons.shield_outlined,
-              color: AppColors.accent,
-              size: 28,
+              Icons.shield,
+              color: AppColors.safe,
+              size: 26,
             ),
           ),
           const SizedBox(width: 16),
@@ -170,22 +298,19 @@ class _SafetyStatusCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("You're Safe", style: textTheme.titleMedium),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(
-                      'Status: ',
-                      style: textTheme.bodyMedium,
-                    ),
-                    Text(
-                      'All clear',
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.accent,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                Text(
+                  "You're Safe",
+                  style: textTheme.titleMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'All clear — no active alerts',
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: AppColors.safe,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -201,13 +326,17 @@ class _SafetyStatusCard extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ActiveTripCard extends StatelessWidget {
-  const _ActiveTripCard({required this.onViewTrip});
+  const _ActiveTripCard({required this.trip, required this.onViewTrip});
 
+  final Trip trip;
   final VoidCallback onViewTrip;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final isActive = trip.status == TripStatus.active;
+    final statusColor = isActive ? AppColors.safe : AppColors.info;
+    final statusSurface = isActive ? AppColors.safeSurface : AppColors.infoSurface;
 
     return Container(
       width: double.infinity,
@@ -216,6 +345,13 @@ class _ActiveTripCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,6 +363,7 @@ class _ActiveTripCard extends StatelessWidget {
                 style: textTheme.bodyMedium?.copyWith(
                   letterSpacing: 1.0,
                   fontWeight: FontWeight.w600,
+                  fontSize: 12,
                 ),
               ),
               const Spacer(),
@@ -236,13 +373,13 @@ class _ActiveTripCard extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: AppColors.accent.withOpacity(0.14),
+                  color: statusSurface,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  'Trip active',
+                  trip.status.label,
                   style: textTheme.bodyMedium?.copyWith(
-                    color: AppColors.accent,
+                    color: statusColor,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -252,12 +389,27 @@ class _ActiveTripCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Mumbai → Goa',
+            trip.name.toUpperCase(),
             style: textTheme.titleMedium,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 4),
-          Text('Aug 21 – Aug 25', style: textTheme.bodyMedium),
+          Text(trip.route, style: textTheme.bodyMedium),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(
+                Icons.calendar_today_outlined,
+                size: 14,
+                color: AppColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                formatDateRange(trip.startDate, trip.endDate),
+                style: textTheme.bodyMedium,
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           Align(
             alignment: Alignment.centerLeft,
@@ -316,8 +468,10 @@ class _QuickActionsSection extends StatelessWidget {
               child: _QuickActionTile(
                 icon: Icons.groups_outlined,
                 label: 'Safety Circle',
-                onTap: () => Navigator.of(context).pushNamed(
-                  AppRoutes.groups,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const SafetyCircleScreen(),
+                  ),
                 ),
               ),
             ),
@@ -335,8 +489,10 @@ class _QuickActionsSection extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _DigitalTouristIdTile(
-          onTap: () => Navigator.of(context).pushNamed(
-            AppRoutes.digitalTouristId,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const DigitalTouristIdScreen(),
+            ),
           ),
         ),
       ],
@@ -514,7 +670,7 @@ class _SafetyAlertsSection extends StatelessWidget {
                 children: [
                   const Icon(
                     Icons.check_circle_outline,
-                    color: AppColors.accent,
+                    color: AppColors.safe,
                     size: 20,
                   ),
                   const SizedBox(width: 10),
@@ -531,7 +687,7 @@ class _SafetyAlertsSection extends StatelessWidget {
                 children: [
                   const Icon(
                     Icons.info_outline,
-                    color: AppColors.textSecondary,
+                    color: AppColors.info,
                     size: 18,
                   ),
                   const SizedBox(width: 10),
@@ -551,54 +707,4 @@ class _SafetyAlertsSection extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Bottom Navigation
-// ---------------------------------------------------------------------------
 
-class _HomeBottomNav extends StatelessWidget {
-  const _HomeBottomNav({required this.currentIndex, required this.onTap});
-
-  final int currentIndex;
-  final ValueChanged<int> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(top: BorderSide(color: AppColors.border)),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          onTap: onTap,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: AppColors.surface,
-          selectedItemColor: AppColors.accent,
-          unselectedItemColor: AppColors.textSecondary,
-          showUnselectedLabels: true,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.card_travel_outlined),
-              label: 'Trips',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_none_outlined),
-              label: 'Alerts',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              label: 'Profile',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

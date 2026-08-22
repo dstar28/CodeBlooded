@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 import '../../models/trip.dart';
-import '../../routes/app_routes.dart';
 import '../../state/trip_store.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/date_format.dart';
 import '../../widgets/app_bottom_nav.dart';
+import '../../widgets/sync_status_badge.dart';
+import '../live_safety_screen.dart';
+import '../safety_circle/safety_circle_screen.dart';
+import '../tourist_id/digital_tourist_id_screen.dart';
 import 'create_trip_screen.dart';
 import 'trip_details_screen.dart';
 
 /// Trips tab — trip list, empty state, and entry point to Create Trip /
 /// Trip Details.
 ///
-/// Trip data comes from [TripStore], an in-memory/mock singleton. Nothing
-/// here talks to Supabase yet.
+/// Trip data comes from [TripStore], an in-memory/mock singleton. As of
+/// Prompt #12, [TripStore] also persists new trips to Supabase in the
+/// background; this screen shows the resulting [SyncStatusBadge] next to
+/// the header so the traveler can see Synced / Offline Mode / Unable to
+/// sync without any other layout changes.
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
 
@@ -21,22 +27,37 @@ class TripsScreen extends StatefulWidget {
 }
 
 class _TripsScreenState extends State<TripsScreen> {
-  static const int _tripsIndex = 1;
+  // Bottom nav order matches the SafeGuard reference shell:
+  // Home | Safety | Group | Trip | Digital ID.
+  static const int _homeIndex = 0;
+  static const int _safetyIndex = 1;
+  static const int _groupIndex = 2;
+  static const int _tripsIndex = 3;
+  static const int _digitalIdIndex = 4;
 
   void _onNavTap(int index) {
     if (index == _tripsIndex) return;
 
     switch (index) {
-      case 0:
+      case _homeIndex:
         // Trips is always pushed on top of Home, so popping back to the
         // first route returns to the dashboard without pushing a new one.
         Navigator.of(context).popUntil((route) => route.isFirst);
         break;
-      case 2:
-        Navigator.of(context).pushNamed(AppRoutes.notifications);
+      case _safetyIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const LiveSafetyScreen()),
+        );
         break;
-      case 3:
-        Navigator.of(context).pushNamed(AppRoutes.profile);
+      case _groupIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SafetyCircleScreen()),
+        );
+        break;
+      case _digitalIdIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DigitalTouristIdScreen()),
+        );
         break;
     }
   }
@@ -64,7 +85,18 @@ class _TripsScreenState extends State<TripsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('My Trips', style: textTheme.headlineMedium),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('My Trips', style: textTheme.headlineMedium),
+                  AnimatedBuilder(
+                    animation: TripStore.instance,
+                    builder: (context, _) => SyncStatusBadge(
+                      state: TripStore.instance.syncState,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 4),
               Text(
                 'Plan and manage your journeys.',

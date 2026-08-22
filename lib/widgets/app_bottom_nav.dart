@@ -3,9 +3,10 @@ import '../theme/app_colors.dart';
 
 /// Shared bottom navigation bar matching SafeGuard's Home dashboard style.
 ///
-/// Home (Prompt #4) defines its own private nav widget inline. This public
-/// version exists so other primary tab screens — starting with Trips —
-/// can reuse the identical look without duplicating or modifying Home.
+/// Tab set matches the SafeGuard reference shell established by Home:
+/// Home | Safety | Group | Trip | Digital ID. This lets other primary tab
+/// screens reuse the identical bar (with the correct tab highlighted)
+/// without duplicating or modifying Home.
 class AppBottomNav extends StatelessWidget {
   const AppBottomNav({
     super.key,
@@ -40,17 +41,24 @@ class AppBottomNav extends StatelessWidget {
               label: 'Home',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.card_travel_outlined),
-              activeIcon: Icon(Icons.card_travel),
-              label: 'Trips',
+              icon: Icon(Icons.shield_outlined),
+              activeIcon: Icon(Icons.shield),
+              label: 'Safety',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_none_outlined),
-              label: 'Alerts',
+              icon: Icon(Icons.groups_outlined),
+              activeIcon: Icon(Icons.groups),
+              label: 'Group',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              label: 'Profile',
+              icon: Icon(Icons.map_outlined),
+              activeIcon: Icon(Icons.map),
+              label: 'Trip',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.badge_outlined),
+              activeIcon: Icon(Icons.badge),
+              label: 'Digital ID',
             ),
           ],
         ),

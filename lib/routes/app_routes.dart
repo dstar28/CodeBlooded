@@ -8,17 +8,17 @@ import '../screens/emergency/emergency_contacts_screen.dart';
 import '../screens/safety_circle/safety_circle_screen.dart';
 import '../screens/tourist_id/digital_tourist_id_screen.dart';
 import '../screens/incidents/report_incident_screen.dart';
+import '../screens/trips/trips_screen.dart';
 
 /// Centralized route names for SafeGuard.
 ///
-/// [login], [signup], [home], [liveSafety], [emergency] (Emergency
-/// Contacts), [groups] (Safety Circle), and [incidents] (Report an
-/// Incident) are wired to real screens.
-/// [trips], [notifications] (Alerts), and [profile] are wired to a
-/// temporary placeholder screen from the Home dashboard until their
-/// dedicated prompts build them out. The remaining constants exist so
-/// later prompts can register their screens here without renaming routes
-/// used elsewhere in the app.
+/// [login], [signup], [home], [trips], [liveSafety], [emergency]
+/// (Emergency Contacts), [groups] (Safety Circle), [digitalTouristId],
+/// and [incidents] (Report an Incident) are wired to real screens.
+/// [notifications] (Alerts) and [profile] are wired to a temporary
+/// placeholder screen until their dedicated prompts build them out. The
+/// remaining constants exist so later prompts can register their screens
+/// here without renaming routes used elsewhere in the app.
 class AppRoutes {
   AppRoutes._();
 
@@ -60,10 +60,7 @@ class AppRoutes {
         );
       case trips:
         return MaterialPageRoute(
-          builder: (_) => const PlaceholderScreen(
-            title: 'My Trips',
-            icon: Icons.card_travel_outlined,
-          ),
+          builder: (_) => const TripsScreen(),
           settings: settings,
         );
       case liveSafety:

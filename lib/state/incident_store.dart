@@ -1,16 +1,18 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/incident.dart';
+import '../services/supabase/incident_repository.dart';
+import '../services/supabase/sync_state.dart';
 
 /// In-memory incident store for local/mock incident state.
 ///
 /// Mirrors [TripStore] and [SosStore]'s lightweight singleton
 /// `ChangeNotifier` approach rather than introducing a new
-/// state-management package or a real backend (Prompt #11 scope).
-/// Incident data only persists for the lifetime of the running app —
-/// Supabase persistence, real evidence upload, admin verification, and
-/// blockchain evidence anchoring will replace/extend this in later
-/// prompts. Do NOT treat this as a real backend service.
+/// state-management package or a real backend. This store remains the
+/// source of truth for the current app session; as of Prompt #12, every
+/// created incident is also persisted to Supabase in the background via
+/// [IncidentRepository] — the incident's own location snapshot only,
+/// never continuous GPS history, and never auto-published to blockchain.
 ///
 /// A traveler only ever sees their own incidents here — there is no
 /// multi-user data in this store, and nothing in it is exposed to other
@@ -25,13 +27,20 @@ class IncidentStore extends ChangeNotifier {
   // Simple local unique-ID strategy for this prompt — a running counter
   // seeded away from 1 so generated IDs read like "INC-1029" rather than
   // "INC-1". This is unique for the current app session only; a real
-  // backend-issued ID will replace it once Supabase persistence exists.
+  // backend-issued ID will replace it once Supabase persistence is fully
+  // load-backed.
   int _nextIdSuffix = 1029;
 
   /// Most recently reported incident first.
   List<Incident> get incidents => List.unmodifiable(_incidents.reversed);
 
   bool get hasIncidents => _incidents.isNotEmpty;
+
+  SyncState _syncState = SyncState.idle;
+
+  /// Status of the most recent Supabase sync attempt, for a small
+  /// "Synced" / "Offline Mode" / "Unable to sync" indicator in the UI.
+  SyncState get syncState => _syncState;
 
   String _generateIncidentId() {
     final id = 'INC-$_nextIdSuffix';
@@ -74,6 +83,7 @@ class IncidentStore extends ChangeNotifier {
 
     _incidents.add(incident);
     notifyListeners();
+    _syncIncident(incident);
     return incident;
   }
 
@@ -81,11 +91,6 @@ class IncidentStore extends ChangeNotifier {
   /// (Prompt #7's Emergency Assistance flow), so the Incident Engine has
   /// a record ready without rewriting the SOS system itself. Called from
   /// [SosStore.activate].
-  ///
-  /// SOS's own location snapshot lives on the Emergency screen only for
-  /// this prompt, so this does not carry coordinates — the incident is
-  /// still clearly marked as location-not-captured rather than showing
-  /// fake coordinates.
   Incident createFromSos({String? tripId}) {
     final now = DateTime.now();
     final incident = Incident(
@@ -109,6 +114,22 @@ class IncidentStore extends ChangeNotifier {
 
     _incidents.add(incident);
     notifyListeners();
+    _syncIncident(incident);
     return incident;
+  }
+
+  Future<void> _syncIncident(Incident incident) async {
+    _syncState = SyncState.syncing;
+    notifyListeners();
+
+    final result = await IncidentRepository.instance.saveIncident(incident);
+    if (result.isSuccess) {
+      _syncState = SyncState.synced;
+    } else if (result.isOffline) {
+      _syncState = SyncState.offline;
+    } else {
+      _syncState = SyncState.error;
+    }
+    notifyListeners();
   }
 }

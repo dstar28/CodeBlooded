@@ -48,6 +48,7 @@ class SafetyCircleMember {
     required this.status,
     this.isCurrentUser = false,
     this.lastUpdatedLabel = 'Just now',
+    this.distanceKm,
   });
 
   final String id;
@@ -58,6 +59,13 @@ class SafetyCircleMember {
   /// Plain-language freshness label (e.g. "Just now", "5 min ago").
   /// Intentionally not a precise timestamp/location trail.
   final String lastUpdatedLabel;
+
+  /// Approximate distance from the current user, in kilometers, for
+  /// display purposes only (e.g. "0.6 km from you"). This is demo/mock
+  /// data — there is no live GPS distance calculation behind it. Null
+  /// for the current user (whose card shows "Current location" instead)
+  /// and for members whose distance is unknown (e.g. offline).
+  final double? distanceKm;
 
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -74,6 +82,7 @@ class SafetyCircleMember {
       status: status ?? this.status,
       isCurrentUser: isCurrentUser,
       lastUpdatedLabel: lastUpdatedLabel,
+      distanceKm: distanceKm,
     );
   }
 }

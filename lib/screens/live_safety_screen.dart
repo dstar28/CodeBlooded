@@ -1,9 +1,15 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/trip.dart';
+import '../routes/app_routes.dart';
 import '../state/trip_store.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_bottom_nav.dart';
+import 'safety_circle/safety_circle_screen.dart';
+import 'tourist_id/digital_tourist_id_screen.dart';
 import 'trips/trip_details_screen.dart';
 
 /// What the screen currently knows about device location access.
@@ -23,82 +29,67 @@ enum _LocationAccessState {
 ///
 /// This is intentionally NOT a numerical risk score — that is an
 /// admin-only concept that must never surface here. No AI risk engine
-/// exists yet, so the value is always [safe] for this prompt.
-enum SafetyStatus { safe, caution, warning, emergency }
+/// exists yet, so this only ever reflects [safe] for real data. The other
+/// two states can only be reached through the on-screen "Simulate Safety
+/// Check (Demo)" control, which is clearly labelled as a presentation-only
+/// demo and never wired to any real detection.
+enum SafetyStatus { safe, caution, restricted }
 
 extension _SafetyStatusPresentation on SafetyStatus {
-  String get headline {
-    switch (this) {
-      case SafetyStatus.safe:
-        return "YOU'RE SAFE";
-      case SafetyStatus.caution:
-        return 'CAUTION';
-      case SafetyStatus.warning:
-        return 'WARNING';
-      case SafetyStatus.emergency:
-        return 'EMERGENCY';
-    }
-  }
-
   String get statusLabel {
     switch (this) {
       case SafetyStatus.safe:
-        return 'All clear';
+        return 'Normal';
       case SafetyStatus.caution:
         return 'Caution';
-      case SafetyStatus.warning:
-        return 'Warning';
-      case SafetyStatus.emergency:
-        return 'Emergency';
+      case SafetyStatus.restricted:
+        return 'Restricted';
     }
   }
 
-  String get supportingText {
+  String get badgeLabel {
     switch (this) {
       case SafetyStatus.safe:
-        return 'No immediate safety concerns detected.';
+        return 'All Clear';
       case SafetyStatus.caution:
-        return 'Stay alert and monitor your surroundings.';
-      case SafetyStatus.warning:
-        return 'Take precautions and stay reachable.';
-      case SafetyStatus.emergency:
-        return 'Seek assistance immediately.';
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case SafetyStatus.safe:
-        return Icons.shield_outlined;
-      case SafetyStatus.caution:
-        return Icons.info_outline;
-      case SafetyStatus.warning:
-        return Icons.warning_amber_outlined;
-      case SafetyStatus.emergency:
-        return Icons.emergency_outlined;
+        return 'Stay Alert';
+      case SafetyStatus.restricted:
+        return 'Take Action';
     }
   }
 
   Color get color {
     switch (this) {
       case SafetyStatus.safe:
-        return AppColors.accent;
+        return AppColors.safe;
       case SafetyStatus.caution:
-        return const Color(0xFFFFB74D);
-      case SafetyStatus.warning:
-        return const Color(0xFFFF8A65);
-      case SafetyStatus.emergency:
+        return AppColors.warning;
+      case SafetyStatus.restricted:
         return AppColors.danger;
+    }
+  }
+
+  Color get surfaceColor {
+    switch (this) {
+      case SafetyStatus.safe:
+        return AppColors.safeSurface;
+      case SafetyStatus.caution:
+        return AppColors.warningSurface;
+      case SafetyStatus.restricted:
+        return AppColors.dangerSurface;
     }
   }
 }
 
-/// Live Safety & Location screen.
+/// Live Safety screen — the "Safety" tab of SafeGuard's shared bottom nav.
 ///
-/// Shows the traveler's current plain-language safety status and current
-/// device location (manual refresh only — no background/continuous
-/// tracking, no geo-fencing, no AI risk scoring, no SOS backend). Location
-/// stays local to the device; nothing here is uploaded anywhere.
+/// Shows the traveler's current plain-language safety status, a stylized
+/// zone visualization (safe / caution / restricted areas) built from the
+/// existing on-device location flow, and reference-style safety
+/// information cards. There is no AI risk engine, no live geofencing
+/// backend, and no new map package here — the zone map is a clearly
+/// illustrative visual, and the "Simulate Safety Check" control is a
+/// labelled demo-only affordance for presentation purposes.
 ///
 /// If [trip] is not supplied, the screen falls back to the current active
 /// trip from [TripStore], if any.
@@ -112,8 +103,17 @@ class LiveSafetyScreen extends StatefulWidget {
 }
 
 class _LiveSafetyScreenState extends State<LiveSafetyScreen> {
-  // Default state for this prompt — there is no AI risk engine yet.
-  static const SafetyStatus _safetyStatus = SafetyStatus.safe;
+  // Shared bottom nav order: Home | Safety | Group | Trip | Digital ID.
+  static const int _homeIndex = 0;
+  static const int _safetyIndex = 1;
+  static const int _groupIndex = 2;
+  static const int _tripIndex = 3;
+  static const int _digitalIdIndex = 4;
+
+  // Real safety state — always [safe] until a real detection backend
+  // exists. Only the demo "Simulate Safety Check" control below can move
+  // this, purely for presentation purposes.
+  SafetyStatus _safetyStatus = SafetyStatus.safe;
 
   _LocationAccessState _accessState = _LocationAccessState.checking;
   Position? _position;
@@ -210,40 +210,183 @@ class _LiveSafetyScreenState extends State<LiveSafetyScreen> {
     );
   }
 
+  void _onNavTap(int index) {
+    if (index == _safetyIndex) return;
+
+    switch (index) {
+      case _homeIndex:
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        break;
+      case _groupIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SafetyCircleScreen()),
+        );
+        break;
+      case _tripIndex:
+        Navigator.of(context).pushNamed(AppRoutes.trips);
+        break;
+      case _digitalIdIndex:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DigitalTouristIdScreen()),
+        );
+        break;
+    }
+  }
+
+  void _simulateSafetyCheck() {
+    setState(() {
+      switch (_safetyStatus) {
+        case SafetyStatus.safe:
+          _safetyStatus = SafetyStatus.caution;
+          break;
+        case SafetyStatus.caution:
+          _safetyStatus = SafetyStatus.restricted;
+          break;
+        case SafetyStatus.restricted:
+          _safetyStatus = SafetyStatus.safe;
+          break;
+      }
+    });
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Demo simulation only — no real safety change was detected.',
+        ),
+      ),
+    );
+  }
+
+  void _showInfoSheet({
+    required String title,
+    required String body,
+    required IconData icon,
+    required Color color,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        final textTheme = Theme.of(context).textTheme;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.14),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, color: color, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(title, style: textTheme.titleMedium)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(body, style: textTheme.bodyLarge),
+              const SizedBox(height: 4),
+              Text(
+                'Demo data shown for preview purposes.',
+                style: textTheme.bodyMedium?.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final trip = _activeTrip;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Live Safety')),
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _LiveSafetyHeader(accessState: _accessState),
+              const _SafeguardBrandHeader(),
               const SizedBox(height: 20),
-              _SafetyStatusCard(status: _safetyStatus),
+              Text('Safety', style: Theme.of(context).textTheme.headlineMedium),
               const SizedBox(height: 16),
-              _buildLocationSection(),
+              _CurrentSafetyStatusCard(status: _safetyStatus),
               const SizedBox(height: 16),
+              _buildMapSection(),
+              const SizedBox(height: 16),
+              _SafetyAdvisoryCard(
+                icon: Icons.warning_amber_rounded,
+                iconColor: AppColors.warning,
+                backgroundColor: AppColors.warningSurface,
+                title: 'Weather Advisory',
+                message: 'Heavy rain expected after 6 PM.',
+                onTap: () => _showInfoSheet(
+                  title: 'Weather Advisory',
+                  body:
+                      'Heavy rain is forecast for this area after 6 PM. '
+                      'Trails may become slippery — plan to be back before '
+                      'the rain sets in.',
+                  icon: Icons.warning_amber_rounded,
+                  color: AppColors.warning,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SafetyAdvisoryCard(
+                icon: Icons.info_outline,
+                iconColor: AppColors.info,
+                backgroundColor: AppColors.infoSurface,
+                title: 'Local Guidance',
+                message:
+                    'Trail lighting is limited after sunset. Plan your '
+                    'return before 18:30.',
+                onTap: () => _showInfoSheet(
+                  title: 'Local Guidance',
+                  body:
+                      'Trail lighting is limited after sunset in this area. '
+                      'We recommend planning your return before 18:30 to '
+                      'avoid low-visibility conditions.',
+                  icon: Icons.info_outline,
+                  color: AppColors.info,
+                ),
+              ),
+              const SizedBox(height: 20),
               if (trip != null) ...[
                 _ActiveTripCard(
                   trip: trip,
                   onViewDetails: () => _openTripDetails(trip),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
               ],
-              _SafetyInformationSection(accessState: _accessState),
+              _buildZonesSection(),
+              const SizedBox(height: 16),
+              _SimulateSafetyCheckTile(onTap: _simulateSafetyCheck),
             ],
           ),
         ),
       ),
+      bottomNavigationBar: AppBottomNav(
+        currentIndex: _safetyIndex,
+        onTap: _onNavTap,
+      ),
     );
   }
 
-  Widget _buildLocationSection() {
+  Widget _buildMapSection() {
     switch (_accessState) {
       case _LocationAccessState.checking:
         return const _LocationCheckingCard();
@@ -252,8 +395,8 @@ class _LiveSafetyScreenState extends State<LiveSafetyScreen> {
           icon: Icons.location_disabled_outlined,
           title: 'Location Services Disabled',
           message:
-              'SafeGuard needs your location to provide travel safety '
-              'information.',
+              'SafeGuard needs your location to show your position on the '
+              'safety map.',
           buttonLabel: 'Open Settings',
           onPressed: _onOpenLocationSettings,
         );
@@ -262,8 +405,8 @@ class _LiveSafetyScreenState extends State<LiveSafetyScreen> {
           icon: Icons.location_off_outlined,
           title: 'Location Permission Required',
           message:
-              'SafeGuard uses your location to provide travel safety '
-              'features.',
+              'SafeGuard uses your location to show your position and '
+              'nearby zones on the safety map.',
           buttonLabel: 'Try Again',
           onPressed: _onTryAgainPermission,
         );
@@ -276,77 +419,78 @@ class _LiveSafetyScreenState extends State<LiveSafetyScreen> {
           onPressed: _fetchPosition,
         );
       case _LocationAccessState.ready:
-        return _LocationReadyCard(
-          position: _position,
+        return _SafetyZoneMap(
           isRefreshing: _isRefreshing,
-          onRefresh: _fetchPosition,
+          onRecenter: _fetchPosition,
         );
     }
   }
-}
 
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
-
-class _LiveSafetyHeader extends StatelessWidget {
-  const _LiveSafetyHeader({required this.accessState});
-
-  final _LocationAccessState accessState;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildZonesSection() {
     final textTheme = Theme.of(context).textTheme;
-    final hasLocation = accessState == _LocationAccessState.ready;
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Live Safety', style: textTheme.headlineMedium),
-              const SizedBox(height: 2),
-              Text(
-                'Your current travel safety status',
-                style: textTheme.bodyMedium,
-              ),
-            ],
+        Text(
+          'ZONES AROUND YOU',
+          style: textTheme.bodyMedium?.copyWith(
+            letterSpacing: 1.0,
+            fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(width: 12),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: (hasLocation ? AppColors.accent : AppColors.textSecondary)
-                .withOpacity(0.14),
-            borderRadius: BorderRadius.circular(20),
+        const SizedBox(height: 12),
+        _ZoneTile(
+          color: AppColors.safe,
+          icon: Icons.park_outlined,
+          title: 'Safe area',
+          subtitle: 'Mawlynnong village trail',
+          badgeLabel: 'Safe',
+          badgeColor: AppColors.safe,
+          badgeSurface: AppColors.safeSurface,
+          onTap: () => _showInfoSheet(
+            title: 'Safe area',
+            body:
+                'The Mawlynnong village trail is an active safe zone with '
+                'good signal coverage and regular foot traffic.',
+            icon: Icons.park_outlined,
+            color: AppColors.safe,
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                hasLocation
-                    ? Icons.location_on_outlined
-                    : Icons.location_searching,
-                size: 14,
-                color: hasLocation
-                    ? AppColors.accent
-                    : AppColors.textSecondary,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                hasLocation ? 'Located' : 'Locating',
-                style: textTheme.bodyMedium?.copyWith(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: hasLocation
-                      ? AppColors.accent
-                      : AppColors.textSecondary,
-                ),
-              ),
-            ],
+        ),
+        const SizedBox(height: 10),
+        _ZoneTile(
+          color: AppColors.warning,
+          icon: Icons.warning_amber_rounded,
+          title: 'Caution area',
+          subtitle: 'River crossing • slippery rocks',
+          badgeLabel: 'Caution',
+          badgeColor: AppColors.warning,
+          badgeSurface: AppColors.warningSurface,
+          onTap: () => _showInfoSheet(
+            title: 'Caution area',
+            body:
+                'The river crossing nearby has slippery rocks, especially '
+                'after rain. Cross carefully and avoid it in low light.',
+            icon: Icons.warning_amber_rounded,
+            color: AppColors.warning,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _ZoneTile(
+          color: AppColors.danger,
+          icon: Icons.block_outlined,
+          title: 'Restricted area',
+          subtitle: 'Forest reserve • entry not permitted',
+          badgeLabel: 'Emergency',
+          badgeColor: AppColors.danger,
+          badgeSurface: AppColors.dangerSurface,
+          onTap: () => _showInfoSheet(
+            title: 'Restricted area',
+            body:
+                'This forest reserve is off-limits to visitors. Entry is '
+                'not permitted and may not be monitored for safety.',
+            icon: Icons.block_outlined,
+            color: AppColors.danger,
           ),
         ),
       ],
@@ -355,11 +499,131 @@ class _LiveSafetyHeader extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Safety Status Card
+// Branding header (logo + bell + settings) — matches the Home dashboard
+// look for a primary tab screen (no back button).
 // ---------------------------------------------------------------------------
 
-class _SafetyStatusCard extends StatelessWidget {
-  const _SafetyStatusCard({required this.status});
+class _SafeguardBrandHeader extends StatelessWidget {
+  const _SafeguardBrandHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.accentDark,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.shield_outlined,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'SAFEGUARD',
+                style: textTheme.titleMedium?.copyWith(
+                  letterSpacing: 0.6,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                'Your Travel Guardian',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: AppColors.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          icon: Icons.notifications_none_outlined,
+          showBadge: true,
+          onTap: () => Navigator.of(context).pushNamed(AppRoutes.notifications),
+        ),
+        const SizedBox(width: 10),
+        _HeaderIconButton(
+          icon: Icons.settings_outlined,
+          onTap: () => Navigator.of(context).pushNamed(AppRoutes.profile),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.showBadge = false,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool showBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon, color: AppColors.textPrimary, size: 20),
+              if (showBadge)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.surface, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Current Safety Status
+// ---------------------------------------------------------------------------
+
+class _CurrentSafetyStatusCard extends StatelessWidget {
+  const _CurrentSafetyStatusCard({required this.status});
 
   final SafetyStatus status;
 
@@ -368,51 +632,96 @@ class _SafetyStatusCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final color = status.color;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.35)),
-      ),
+    return _SoftCard(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.16),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(status.icon, color: color, size: 28),
-          ),
-          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(status.headline, style: textTheme.titleMedium),
-                const SizedBox(height: 4),
+                Text('Current Safety Status', style: textTheme.bodyMedium),
+                const SizedBox(height: 8),
                 Row(
                   children: [
-                    Text('Status: ', style: textTheme.bodyMedium),
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Text(
                       status.statusLabel,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: textTheme.titleMedium?.copyWith(color: color),
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(status.supportingText, style: textTheme.bodyMedium),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: status.surfaceColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield, color: color, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  status.badgeLabel,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared soft card container
+// ---------------------------------------------------------------------------
+
+class _SoftCard extends StatelessWidget {
+  const _SoftCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(18),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 }
@@ -428,14 +737,8 @@ class _LocationCheckingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      width: double.infinity,
+    return _SoftCard(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
       child: Column(
         children: [
           const SizedBox(
@@ -477,14 +780,7 @@ class _LocationMessageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
+    return _SoftCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -502,112 +798,193 @@ class _LocationMessageCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Location — ready (coordinates + map placeholder + refresh)
+// Safety zone map — stylized, reference-style visualization.
+//
+// This is a purely decorative mock (no map package, no real geofencing):
+// a soft terrain backdrop with a current-location marker plus safe/caution/
+// restricted zone overlays, matching the reference screen's layout.
 // ---------------------------------------------------------------------------
 
-class _LocationReadyCard extends StatelessWidget {
-  const _LocationReadyCard({
-    required this.position,
-    required this.isRefreshing,
-    required this.onRefresh,
-  });
+class _SafetyZoneMap extends StatelessWidget {
+  const _SafetyZoneMap({required this.isRefreshing, required this.onRecenter});
 
-  final Position? position;
   final bool isRefreshing;
-  final VoidCallback onRefresh;
-
-  String _formatLat(double lat) {
-    final direction = lat >= 0 ? 'N' : 'S';
-    return '${lat.abs().toStringAsFixed(4)}° $direction';
-  }
-
-  String _formatLng(double lng) {
-    final direction = lng >= 0 ? 'E' : 'W';
-    return '${lng.abs().toStringAsFixed(4)}° $direction';
-  }
+  final VoidCallback onRecenter;
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    final pos = position;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 240,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CustomPaint(painter: _TerrainPainter()),
+                const Positioned(
+                  left: 14,
+                  top: 14,
+                  child: _MapPlaceLabel(
+                    icon: Icons.park,
+                    label: 'Village Trail',
+                  ),
+                ),
+                const Positioned(
+                  right: 60,
+                  bottom: 16,
+                  child: _MapPlaceLabel(
+                    icon: Icons.landscape,
+                    label: 'Viewpoint',
+                  ),
+                ),
+                Positioned(
+                  right: 30,
+                  top: 30,
+                  child: _DashedZoneBadge(
+                    color: AppColors.warning,
+                    label: 'Caution Area',
+                    icon: Icons.warning_amber_rounded,
+                    size: 108,
+                  ),
+                ),
+                Positioned(
+                  left: 24,
+                  bottom: 40,
+                  child: _DashedZoneBadge(
+                    color: AppColors.danger,
+                    label: 'Restricted\nArea',
+                    icon: Icons.block,
+                    size: 118,
+                  ),
+                ),
+                const Center(child: _CurrentLocationMarker()),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: _RecenterButton(
+                    isRefreshing: isRefreshing,
+                    onTap: onRecenter,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: AppColors.border)),
+            ),
+            child: Wrap(
+              spacing: 18,
+              runSpacing: 6,
+              children: const [
+                _ZoneLegendDot(color: AppColors.safe, label: 'Safe Area'),
+                _ZoneLegendDot(color: AppColors.warning, label: 'Caution Area'),
+                _ZoneLegendDot(color: AppColors.danger, label: 'Restricted Area'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.border),
+class _MapPlaceLabel extends StatelessWidget {
+  const _MapPlaceLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: AppColors.accentDark),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Current Location', style: textTheme.titleMedium),
-              const SizedBox(height: 14),
-              // Map area: no Google Maps configuration exists in this
-              // project yet, so a polished placeholder stands in for it
-              // rather than faking map functionality.
-              Container(
-                width: double.infinity,
-                height: 160,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.map_outlined,
-                      color: AppColors.textSecondary,
-                      size: 26,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'LIVE LOCATION MAP',
-                      style: textTheme.bodyMedium?.copyWith(
-                        letterSpacing: 1.0,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Waiting for map configuration',
-                      style: textTheme.bodyMedium?.copyWith(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _CoordinateTile(
-                      label: 'Latitude',
-                      value: pos != null ? _formatLat(pos.latitude) : '—',
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _CoordinateTile(
-                      label: 'Longitude',
-                      value: pos != null ? _formatLng(pos.longitude) : '—',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CurrentLocationMarker extends StatelessWidget {
+  const _CurrentLocationMarker();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.info.withOpacity(0.18),
+        shape: BoxShape.circle,
+      ),
+      child: Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(
+          color: AppColors.info,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 3),
         ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: isRefreshing ? null : onRefresh,
-          icon: isRefreshing
+      ),
+    );
+  }
+}
+
+class _RecenterButton extends StatelessWidget {
+  const _RecenterButton({required this.isRefreshing, required this.onTap});
+
+  final bool isRefreshing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 1,
+      child: InkWell(
+        onTap: isRefreshing ? null : onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          child: isRefreshing
               ? const SizedBox(
                   width: 16,
                   height: 16,
@@ -616,45 +993,251 @@ class _LocationReadyCard extends StatelessWidget {
                     color: AppColors.accent,
                   ),
                 )
-              : const Icon(Icons.refresh, size: 18),
-          label: Text(isRefreshing ? 'Refreshing…' : 'Refresh Location'),
+              : const Icon(
+                  Icons.my_location,
+                  size: 18,
+                  color: AppColors.accentDark,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedZoneBadge extends StatelessWidget {
+  const _DashedZoneBadge({
+    required this.color,
+    required this.label,
+    required this.icon,
+    required this.size,
+  });
+
+  final Color color;
+  final String label;
+  final IconData icon;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CustomPaint(
+            size: Size(size, size),
+            painter: _DashedCirclePainter(color: color),
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                  height: 1.15,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedCirclePainter extends CustomPainter {
+  _DashedCirclePainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 2;
+
+    final fillPaint = Paint()
+      ..color = color.withOpacity(0.12)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, radius, fillPaint);
+
+    final dashPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    const dashCount = 24;
+    const gapFraction = 0.5;
+    final sweep = (2 * math.pi) / dashCount;
+
+    for (var i = 0; i < dashCount; i++) {
+      final startAngle = i * sweep;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweep * gapFraction,
+        false,
+        dashPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedCirclePainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
+}
+
+class _TerrainPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backgroundPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          AppColors.safe.withOpacity(0.14),
+          AppColors.info.withOpacity(0.10),
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
+
+    final riverPaint = Paint()
+      ..color = AppColors.info.withOpacity(0.30)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..strokeCap = StrokeCap.round;
+
+    final riverPath = Path()
+      ..moveTo(0, size.height * 0.25)
+      ..quadraticBezierTo(
+        size.width * 0.25,
+        size.height * 0.45,
+        size.width * 0.5,
+        size.height * 0.30,
+      )
+      ..quadraticBezierTo(
+        size.width * 0.75,
+        size.height * 0.15,
+        size.width,
+        size.height * 0.35,
+      );
+    canvas.drawPath(riverPath, riverPaint);
+
+    final terrainPaint = Paint()..color = AppColors.safe.withOpacity(0.10);
+    canvas.drawCircle(
+      Offset(size.width * 0.12, size.height * 0.85),
+      54,
+      terrainPaint,
+    );
+    canvas.drawCircle(
+      Offset(size.width * 0.9, size.height * 0.9),
+      70,
+      terrainPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TerrainPainter oldDelegate) => false;
+}
+
+class _ZoneLegendDot extends StatelessWidget {
+  const _ZoneLegendDot({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
         ),
       ],
     );
   }
 }
 
-class _CoordinateTile extends StatelessWidget {
-  const _CoordinateTile({required this.label, required this.value});
+// ---------------------------------------------------------------------------
+// Advisory cards (Weather / Local Guidance)
+// ---------------------------------------------------------------------------
 
-  final String label;
-  final String value;
+class _SafetyAdvisoryCard extends StatelessWidget {
+  const _SafetyAdvisoryCard({
+    required this.icon,
+    required this.iconColor,
+    required this.backgroundColor,
+    required this.title,
+    required this.message,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color backgroundColor;
+  final String title;
+  final String message;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: textTheme.bodyMedium?.copyWith(fontSize: 12)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: textTheme.bodyLarge?.copyWith(
-              color: AppColors.accent,
-              fontWeight: FontWeight.w600,
-            ),
-            overflow: TextOverflow.ellipsis,
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: iconColor.withOpacity(0.25)),
           ),
-        ],
+          child: Row(
+            children: [
+              Icon(icon, color: iconColor, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(message, style: textTheme.bodyMedium),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -674,14 +1257,7 @@ class _ActiveTripCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
+    return _SoftCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -732,98 +1308,197 @@ class _ActiveTripCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Safety Information
+// Zones list
 // ---------------------------------------------------------------------------
 
-class _SafetyInformationSection extends StatelessWidget {
-  const _SafetyInformationSection({required this.accessState});
+class _ZoneTile extends StatelessWidget {
+  const _ZoneTile({
+    required this.color,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.badgeLabel,
+    required this.badgeColor,
+    required this.badgeSurface,
+    required this.onTap,
+  });
 
-  final _LocationAccessState accessState;
+  final Color color;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String badgeLabel;
+  final Color badgeColor;
+  final Color badgeSurface;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    final servicesEnabled =
-        accessState != _LocationAccessState.serviceDisabled;
-    final gpsAvailable = accessState == _LocationAccessState.ready;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Safety Information', style: textTheme.titleMedium),
-        const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
           decoration: BoxDecoration(
-            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: Column(
+          child: Row(
             children: [
-              _InfoRow(
-                icon: Icons.location_on_outlined,
-                label: 'Location services',
-                value: servicesEnabled ? 'Enabled' : 'Disabled',
-                isPositive: servicesEnabled,
+              Container(
+                width: 4,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(16),
+                  ),
+                ),
               ),
-              const Divider(height: 1),
-              _InfoRow(
-                icon: Icons.gps_fixed,
-                label: 'GPS',
-                value: gpsAvailable ? 'Available' : 'Unavailable',
-                isPositive: gpsAvailable,
-              ),
-              const Divider(height: 1),
-              const _InfoRow(
-                icon: Icons.shield_outlined,
-                label: 'Safety monitoring',
-                value: 'Ready',
-                isPositive: true,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: color, size: 18),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: textTheme.bodyLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              subtitle,
+                              style: textTheme.bodyMedium?.copyWith(
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeSurface,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          badgeLabel,
+                          style: TextStyle(
+                            color: badgeColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.textSecondary,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.isPositive,
-  });
+// ---------------------------------------------------------------------------
+// Simulate Safety Check (demo)
+// ---------------------------------------------------------------------------
 
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool isPositive;
+class _SimulateSafetyCheckTile extends StatelessWidget {
+  const _SimulateSafetyCheckTile({required this.onTap});
+
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final valueColor = isPositive ? AppColors.accent : AppColors.textSecondary;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Icon(icon, color: AppColors.accent, size: 18),
-          const SizedBox(width: 10),
-          Expanded(child: Text(label, style: textTheme.bodyLarge)),
-          Text(
-            value,
-            style: textTheme.bodyMedium?.copyWith(
-              color: valueColor,
-              fontWeight: FontWeight.w600,
-            ),
+    return Material(
+      color: AppColors.surfaceVariant,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border),
           ),
-        ],
+          child: Row(
+            children: [
+              const Icon(
+                Icons.science_outlined,
+                color: AppColors.accent,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Simulate Safety Check (Demo)',
+                      style: textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'This is a demo feature for presentation only.',
+                      style: textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart';
 import '../models/emergency_contact.dart';
+import '../services/supabase/emergency_contact_repository.dart';
+import '../services/supabase/sync_state.dart';
 
 /// In-memory emergency contact store (Prompt #8).
 ///
 /// Mirrors [TripStore] and [SosStore]'s lightweight singleton
-/// `ChangeNotifier` approach rather than introducing a new state-management
-/// package. Contacts only persist for the current app session — Supabase
-/// persistence will replace this in a later prompt. Do NOT treat this as a
-/// real backend/service: nothing here sends a real SMS, call, or
+/// `ChangeNotifier` approach rather than introducing a new
+/// state-management package. This store remains the source of truth for
+/// the current app session; as of Prompt #12 every mutation is also
+/// persisted to Supabase in the background via
+/// [EmergencyContactRepository]. Nothing here sends a real SMS, call, or
 /// notification.
 class EmergencyContactsStore extends ChangeNotifier {
   EmergencyContactsStore._internal();
@@ -18,6 +21,12 @@ class EmergencyContactsStore extends ChangeNotifier {
   final List<EmergencyContact> _contacts = [];
 
   List<EmergencyContact> get contacts => List.unmodifiable(_contacts);
+
+  SyncState _syncState = SyncState.idle;
+
+  /// Status of the most recent Supabase sync attempt, for a small
+  /// "Synced" / "Offline Mode" / "Unable to sync" indicator in the UI.
+  SyncState get syncState => _syncState;
 
   /// The single contact currently marked primary, or null if none/no
   /// contacts exist yet.
@@ -34,6 +43,7 @@ class EmergencyContactsStore extends ChangeNotifier {
     }
     _contacts.add(contact);
     notifyListeners();
+    _syncContact(contact);
   }
 
   void updateContact(EmergencyContact updated) {
@@ -45,11 +55,13 @@ class EmergencyContactsStore extends ChangeNotifier {
     }
     _contacts[index] = updated;
     notifyListeners();
+    _syncContact(_contacts[index]);
   }
 
   void deleteContact(String id) {
     _contacts.removeWhere((c) => c.id == id);
     notifyListeners();
+    _syncDelete(id);
   }
 
   /// Marks [id] as the primary contact. Any previously primary contact
@@ -61,6 +73,7 @@ class EmergencyContactsStore extends ChangeNotifier {
     if (index == -1) return;
     _contacts[index] = _contacts[index].copyWith(isPrimary: true);
     notifyListeners();
+    _syncContact(_contacts[index]);
   }
 
   void _clearPrimary() {
@@ -69,5 +82,34 @@ class EmergencyContactsStore extends ChangeNotifier {
         _contacts[i] = _contacts[i].copyWith(isPrimary: false);
       }
     }
+  }
+
+  Future<void> _syncContact(EmergencyContact contact) async {
+    _syncState = SyncState.syncing;
+    notifyListeners();
+
+    final result =
+        await EmergencyContactRepository.instance.saveContact(contact);
+    _applySyncResult(success: result.isSuccess, offline: result.isOffline);
+  }
+
+  Future<void> _syncDelete(String id) async {
+    _syncState = SyncState.syncing;
+    notifyListeners();
+
+    final result =
+        await EmergencyContactRepository.instance.deleteContact(id);
+    _applySyncResult(success: result.isSuccess, offline: result.isOffline);
+  }
+
+  void _applySyncResult({required bool success, required bool offline}) {
+    if (success) {
+      _syncState = SyncState.synced;
+    } else if (offline) {
+      _syncState = SyncState.offline;
+    } else {
+      _syncState = SyncState.error;
+    }
+    notifyListeners();
   }
 }

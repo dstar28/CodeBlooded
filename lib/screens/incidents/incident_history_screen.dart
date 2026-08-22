@@ -3,15 +3,16 @@ import 'package:flutter/material.dart';
 import '../../models/incident.dart';
 import '../../state/incident_store.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/sync_status_badge.dart';
 import 'incident_details_screen.dart';
 
 /// Incident History screen (Prompt #11).
 ///
-/// Lists the traveler's own previously-reported local incidents from
-/// [IncidentStore], most recent first. There is no Supabase persistence
-/// yet, so this list only reflects the current app session, and only the
-/// signed-in traveler's own incidents are ever shown — no other
-/// traveler's reports appear here.
+/// Lists the traveler's own previously-reported incidents from
+/// [IncidentStore], most recent first. As of Prompt #12, each reported
+/// incident is also persisted to Supabase in the background — the sync
+/// status is shown in the app bar. Only the signed-in traveler's own
+/// incidents are ever shown here.
 class IncidentHistoryScreen extends StatefulWidget {
   const IncidentHistoryScreen({super.key});
 
@@ -49,7 +50,19 @@ class _IncidentHistoryScreenState extends State<IncidentHistoryScreen> {
     final incidents = IncidentStore.instance.incidents;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Incident History')),
+      appBar: AppBar(
+        title: const Text('Incident History'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: SyncStatusBadge(
+                state: IncidentStore.instance.syncState,
+              ),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: incidents.isEmpty
             ? const _EmptyState()

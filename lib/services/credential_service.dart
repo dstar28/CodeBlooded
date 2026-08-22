@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -5,32 +6,31 @@ import 'package:flutter/foundation.dart';
 import '../models/tourist_credential.dart';
 import 'blockchain/blockchain_trust_service.dart';
 import 'blockchain/mock_blockchain_service.dart';
+import 'supabase/sync_state.dart';
+import 'supabase/tourist_credential_repository.dart';
 
 /// Credential Service — the single place the Digital Tourist ID UI talks
 /// to for issuing, verifying, and revoking a credential.
 ///
-/// Architecture (per Prompt #10):
+/// Architecture (per Prompt #10, extended by Prompt #12):
 ///
 /// ```
 /// Digital Tourist ID (UI)
 ///        |
 /// CredentialService              <- this file
-///        |
-/// BlockchainTrustService (interface)
-///        |
-/// MockBlockchainService          <- prototype trust registry
+///       / \
+/// TouristCredentialRepository   BlockchainTrustService (interface)
+///  (Supabase, non-sensitive       |
+///   app-side record)         MockBlockchainService (prototype registry)
 /// ```
 ///
 /// [CredentialService] owns the tourist-facing [TouristCredential]
-/// (including the display-only name/type), while only the non-sensitive
-/// subset (credential ID, credential hash, issuer ID, status, timestamps)
-/// is ever passed down to [BlockchainTrustService]. Mirrors the lightweight
-/// singleton `ChangeNotifier` pattern already used by the other stores in
-/// this app (see `EmergencyContactsStore`, `TripStore`) rather than
-/// introducing a new state-management dependency.
-///
-/// This is mock/local data for now — there is no Supabase sync and no
-/// real tourist profile collection here.
+/// (including the display-only name/type). Only the non-sensitive subset
+/// (credential ID, credential hash, issuer ID, status) is ever passed to
+/// [BlockchainTrustService] *or* persisted via
+/// [TouristCredentialRepository] — the tourist's name never leaves this
+/// service. Mirrors the lightweight singleton `ChangeNotifier` pattern
+/// already used by the other stores in this app.
 class CredentialService extends ChangeNotifier {
   CredentialService._internal({BlockchainTrustService? blockchainService})
       : _blockchain = blockchainService ?? MockBlockchainService();
@@ -47,6 +47,12 @@ class CredentialService extends ChangeNotifier {
 
   TouristCredential? get credential => _credential;
   bool get isIssuing => _isIssuing;
+
+  SyncState _syncState = SyncState.idle;
+
+  /// Status of the most recent Supabase sync attempt for the tourist's
+  /// application-side credential record.
+  SyncState get syncState => _syncState;
 
   /// Issues the demo credential the first time this is called, and
   /// registers its proof with the blockchain trust layer. Safe to call
@@ -79,6 +85,7 @@ class CredentialService extends ChangeNotifier {
 
     _isIssuing = false;
     notifyListeners();
+    unawaited(_syncCredential());
   }
 
   /// Asks the trust registry to check this credential's current standing.
@@ -105,6 +112,7 @@ class CredentialService extends ChangeNotifier {
       revokedAt: record.revokedAt,
     );
     notifyListeners();
+    unawaited(_syncCredential());
   }
 
   /// Demo Controls action: restores a revoked credential back to active,
@@ -121,6 +129,26 @@ class CredentialService extends ChangeNotifier {
       clearRevokedAt: true,
     );
     notifyListeners();
+    unawaited(_syncCredential());
+  }
+
+  Future<void> _syncCredential() async {
+    final current = _credential;
+    if (current == null) return;
+
+    _syncState = SyncState.syncing;
+    notifyListeners();
+
+    final result =
+        await TouristCredentialRepository.instance.saveCredential(current);
+    if (result.isSuccess) {
+      _syncState = SyncState.synced;
+    } else if (result.isOffline) {
+      _syncState = SyncState.offline;
+    } else {
+      _syncState = SyncState.error;
+    }
+    notifyListeners();
   }
 
   String _generateCredentialId() {
@@ -135,11 +163,9 @@ class CredentialService extends ChangeNotifier {
   ///
   /// This is NOT a hash of the tourist's passport/Aadhaar number or any
   /// other predictable personal data — it never receives that data in the
-  /// first place. It's a randomly generated commitment tied only to the
-  /// credential ID, standing in for what a real issuance backend would
-  /// produce as a signed credential hash. A production system would
-  /// generate this server-side, from a salted credential payload, using a
-  /// proper cryptographic hash — never on-device from raw identifiers.
+  /// first place. A production system would generate this server-side,
+  /// from a salted credential payload, using a proper cryptographic hash
+  /// — never on-device from raw identifiers.
   String _generateCredentialHash(String credentialId) {
     final random = Random.secure();
     final bytes = List<int>.generate(32, (_) => random.nextInt(256));

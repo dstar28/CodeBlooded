@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../routes/app_routes.dart';
+import '../services/supabase/profile_repository.dart';
 
 /// Signup screen for SafeGuard.
 ///
 /// Local UI validation only — no real account is created, no password is
-/// stored, no backend is contacted.
+/// stored, no backend authentication is contacted. As of Prompt #12, a
+/// successful mock signup fires a best-effort, non-blocking attempt to
+/// persist a demo profile row (full name only) to Supabase.
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
 
@@ -37,6 +42,13 @@ class _SignupScreenState extends State<SignupScreen> {
 
   void _handleCreateAccount() {
     if (_formKey.currentState!.validate()) {
+      // Best-effort profile persistence — fire-and-forget, never blocks
+      // the UI, and safely no-ops when Supabase is unavailable.
+      unawaited(
+        ProfileRepository.instance.ensureProfile(
+          fullName: _fullNameController.text.trim(),
+        ),
+      );
       _showSuccessDialog();
     }
   }

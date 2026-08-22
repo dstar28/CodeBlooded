@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import '../../models/emergency_contact.dart';
 import '../../state/emergency_contacts_store.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/sync_status_badge.dart';
 import 'contact_form_screen.dart';
 
 /// Emergency Contacts screen (Prompt #8).
 ///
 /// Lets a traveler add, edit, delete, and mark a primary trusted contact.
-/// Contacts live only in [EmergencyContactsStore] for the current app
-/// session — there is no Supabase sync, real SMS/calls, or notifications
-/// behind this screen yet.
+/// [EmergencyContactsStore] remains the source of truth for the current
+/// app session; as of Prompt #12 it also persists changes to Supabase in
+/// the background. This screen shows the resulting sync status in the
+/// app bar — there is still no real SMS/calls or notifications behind
+/// this screen.
 class EmergencyContactsScreen extends StatefulWidget {
   const EmergencyContactsScreen({super.key});
 
@@ -84,7 +87,19 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Emergency Contacts')),
+      appBar: AppBar(
+        title: const Text('Emergency Contacts'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: SyncStatusBadge(
+                state: EmergencyContactsStore.instance.syncState,
+              ),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
