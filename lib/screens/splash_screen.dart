@@ -3,13 +3,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../routes/app_routes.dart';
+import '../services/supabase/auth_repository.dart';
 import '../theme/app_colors.dart';
 
-/// Splash screen shown on app launch.
+/// Splash / session-gate screen shown on app launch.
 ///
 /// Displays the SafeGuard brand mark with a short fade + scale entrance
-/// animation, then automatically advances to Onboarding. No tap is
-/// required from the user.
+/// animation, then checks for a valid, locally-persisted Supabase Auth
+/// session ("Remember Me") via [AuthRepository.ensureFreshSession] and
+/// routes accordingly:
+///   - valid session found  -> Home (no login prompt)
+///   - none/expired/invalid -> Login (any invalid local session is
+///     cleared as part of that check, see AuthRepository)
+///
+/// This replaces the previous unconditional "always go to Onboarding"
+/// behavior — Onboarding was never actually reachable before (this
+/// screen wasn't wired into initialRoute), so no existing navigation
+/// path is being broken.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -23,8 +33,9 @@ class _SplashScreenState extends State<SplashScreen>
   late final Animation<double> _fade;
   late final Animation<double> _scale;
 
-  static const Duration _navigationDelay = Duration(milliseconds: 2200);
-  Timer? _navigationTimer;
+  // Minimum time the brand mark stays on screen, so the session check
+  // (which is often near-instant) never reads as a flicker.
+  static const Duration _minimumDisplay = Duration(milliseconds: 900);
 
   @override
   void initState() {
@@ -42,16 +53,27 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    _navigationTimer = Timer(_navigationDelay, () {
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed(AppRoutes.onboarding);
-      }
-    });
+    unawaited(_checkSessionAndNavigate());
+  }
+
+  Future<void> _checkSessionAndNavigate() async {
+    final stopwatch = Stopwatch()..start();
+
+    final hasValidSession = await AuthRepository.instance.ensureFreshSession();
+
+    final remaining = _minimumDisplay - stopwatch.elapsed;
+    if (remaining > Duration.zero) {
+      await Future.delayed(remaining);
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushReplacementNamed(
+      hasValidSession ? AppRoutes.home : AppRoutes.login,
+    );
   }
 
   @override
   void dispose() {
-    _navigationTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }

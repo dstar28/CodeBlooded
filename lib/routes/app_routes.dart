@@ -3,6 +3,7 @@ import '../screens/home_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/signup_screen.dart';
 import '../screens/placeholder_screen.dart';
+import '../screens/splash_screen.dart';
 import '../screens/live_safety_screen.dart';
 import '../screens/emergency/emergency_contacts_screen.dart';
 import '../screens/safety_circle/safety_circle_screen.dart';
@@ -38,11 +39,19 @@ class AppRoutes {
   static const String notifications = '/notifications';
   static const String profile = '/profile';
 
-  /// Temporary initial route until Splash (Prompt #2) exists.
-  static const String initialRoute = home;
+  /// App launch lands on the Splash/session-gate screen, which checks
+  /// for a valid "Remember Me" Supabase session and routes to Home or
+  /// Login accordingly (see SplashScreen) — it never lands directly on
+  /// Home without that check.
+  static const String initialRoute = splash;
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
+      case splash:
+        return MaterialPageRoute(
+          builder: (_) => const SplashScreen(),
+          settings: settings,
+        );
       case login:
         return MaterialPageRoute(
           builder: (_) => const LoginScreen(),

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; background: #eef1f4; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Fallback center (used only until the first real GPS fix arrives).
+    var DEFAULT_CENTER = [20.5937, 78.9629];
+
+    var map = L.map('map', { zoomControl: false, attributionControl: true })
+      .setView(DEFAULT_CENTER, 5);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    var ZONE_COLORS = {
+      danger: '#DC2626',
+      warning: '#B45309',
+      safe: '#1B8A4A'
+    };
+
+    function zoneStyle(feature) {
+      var type = (feature && feature.properties && feature.properties.zone_type) || 'danger';
+      var color = ZONE_COLORS[type] || ZONE_COLORS.danger;
+      return {
+        color: color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.22
+      };
+    }
+
+    var zonesLayer = L.geoJSON(null, {
+      style: zoneStyle,
+      onEachFeature: function (feature, layer) {
+        var name = (feature.properties && feature.properties.name) || 'Zone';
+        var type = (feature.properties && feature.properties.zone_type) || '';
+        layer.bindPopup('<b>' + name + '</b><br/>' + type);
+      }
+    }).addTo(map);
+
+    var userMarker = null;
+    var userAccuracyCircle = null;
+    var hasCenteredOnUser = false;
+
+    // Called from Flutter with the device's real GPS position.
+    function setUserLocation(lat, lng, accuracyMeters) {
+      var latLng = [lat, lng];
+
+      if (!userMarker) {
+        userMarker = L.circleMarker(latLng, {
+          radius: 8,
+          color: '#ffffff',
+          weight: 3,
+          fillColor: '#2563EB',
+          fillOpacity: 1
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng(latLng);
+      }
+
+      if (accuracyMeters && accuracyMeters > 0) {
+        if (!userAccuracyCircle) {
+          userAccuracyCircle = L.circle(latLng, {
+            radius: accuracyMeters,
+            color: '#2563EB',
+            weight: 1,
+            fillColor: '#2563EB',
+            fillOpacity: 0.08
+          }).addTo(map);
+        } else {
+          userAccuracyCircle.setLatLng(latLng);
+          userAccuracyCircle.setRadius(accuracyMeters);
+        }
+      }
+
+      if (!hasCenteredOnUser) {
+        map.setView(latLng, 16);
+        hasCenteredOnUser = true;
+      }
+    }
+
+    // Called from Flutter with a GeoJSON FeatureCollection string
+    // (danger / warning / safe zones from GET /zones/active).
+    function setZones(geojsonString) {
+      var data = JSON.parse(geojsonString);
+      zonesLayer.clearLayers();
+      zonesLayer.addData(data);
+    }
+
+    // Called from Flutter's "recenter" button.
+    function recenter() {
+      if (userMarker) {
+        map.setView(userMarker.getLatLng(), Math.max(map.getZoom(), 16));
+      }
+    }
+  </script>
+</body>
+</html>

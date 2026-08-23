@@ -3,6 +3,7 @@ import '../models/trip.dart';
 import '../state/trip_store.dart';
 import '../theme/app_colors.dart';
 import '../routes/app_routes.dart';
+import '../services/supabase/auth_repository.dart';
 import '../utils/date_format.dart';
 import '../widgets/app_bottom_nav.dart';
 import 'emergency/emergency_screen.dart';
@@ -78,6 +79,43 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out of SafeGuard?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(
+              'Log Out',
+              style: TextStyle(color: AppColors.danger),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Signs out of Supabase and clears the locally persisted "Remember
+    // Me" session in one call (see AuthRepository.signOut).
+    await AuthRepository.instance.signOut();
+
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      AppRoutes.login,
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final trips = TripStore.instance.trips;
@@ -91,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const _HomeHeader(),
+              _HomeHeader(onLogout: _handleLogout),
               const SizedBox(height: 20),
               const _GreetingText(),
               const SizedBox(height: 16),
@@ -123,7 +161,9 @@ class _HomeScreenState extends State<HomeScreen> {
 // ---------------------------------------------------------------------------
 
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader();
+  const _HomeHeader({required this.onLogout});
+
+  final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -178,6 +218,11 @@ class _HomeHeader extends StatelessWidget {
         _HeaderIconButton(
           icon: Icons.person_outline,
           onTap: () => Navigator.of(context).pushNamed(AppRoutes.profile),
+        ),
+        const SizedBox(width: 10),
+        _HeaderIconButton(
+          icon: Icons.logout,
+          onTap: onLogout,
         ),
       ],
     );
